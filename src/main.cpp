@@ -92,6 +92,7 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    // Discover COM devices
     comEnumerate();
 
     while ((opt = getopt(argc, argv, "plh:")) != -1) {
