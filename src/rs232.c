@@ -204,15 +204,19 @@ int comOpen(int index, int baudrate)
 {
     DCB config;
     COMMTIMEOUTS timeouts;
-    if (index < 0 || index >= noDevices)
+    if (index < 0 || index >= noDevices){
+        printf("comOpen: Invalid device index\n");
         return 0;
+    }
 // Close if already open
     COMDevice * com = &comDevices[index];
     if (com->handle) comClose(index);
 // Open COM port
     void * handle = CreateFileA(comGetInternalName(index), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, NULL);
-    if (handle == INVALID_HANDLE_VALUE)
+    if (handle == INVALID_HANDLE_VALUE){
+        printf("comOpen: Couldn't open handle, try reconnecting the cable.\n");
         return 0;
+    }
     com->handle = handle;
 // Prepare read / write timeouts
     SetupComm(handle, 64, 64);
@@ -232,10 +236,11 @@ int comOpen(int index, int baudrate)
     config.fAbortOnError = 0;
     config.ByteSize = 8;
     config.Parity = 0;
-    config.StopBits = 1;
+    config.StopBits = 0;
     config.EvtChar = '\n';
 // Set the port state
     if (SetCommState(handle, &config) == 0) {
+        printf("comOpen: Couldn't set comm state, maybe the device has a different serial port settings?\n");
         CloseHandle(handle);
         return 0;
     }
