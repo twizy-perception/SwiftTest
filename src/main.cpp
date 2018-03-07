@@ -1,16 +1,19 @@
+
+#include <winsock2.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include <rs232.h>
-
 #include <libsbp/sbp.h>
 #include <libsbp/system.h>
 #include <libsbp/piksi.h>
+#include <w32api/inaddr.h>
 
-char *serial_port_name = NULL;
-int piksi_port = -1;
+#define BUFLEN 512  //Max length of buffer
+#define PORT 55557  //The port on which to listen for incoming data
+#define SERVER "192.168.0.222"
 
 static sbp_msg_callbacks_node_t heartbeat_callback_node;
 static sbp_msg_callbacks_node_t monitor_callback_node;
@@ -83,80 +86,46 @@ u32 piksi_port_read(u8 *buff, u32 n, void *context)
     (void)context;
     u32 result;
 
-    result = comRead(piksi_port, (char *) buff, n);
+    //result = comRead(piksi_port, (char *) buff, n);
 
     return result;
 }
 
 int main(int argc, char **argv)
 {
-    int opt;
-    int result = 0;
-    int numPorts;
-
-    char *optarg;
-
     sbp_state_t s;
 
-    if (argc <= 1) {
-        usage(argv[0]);
+    struct sockaddr_in si_other;
+    SOCKET sock;
+    int slen;
+    char buf[BUFLEN];
+    char message[BUFLEN];
+    WSADATA wsa;
+
+    printf("Initializing WinSock...\n");
+    if(WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR){
+        printf("Failed. Error code: %d", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
+    printf("Initialized\n");
 
-    // Discover COM devices
-    comEnumerate();
-/*
-    while ((opt = getopt(argc, argv, "p:")) != -1) {
-        printf("%c: %s\n", opt, optarg);
-        switch (opt) {
-            case 'p':
-                serial_port_name = (char *)calloc(strlen(optarg) + 1, sizeof(char));
-                printf(serial_port_name);
-                if (!serial_port_name) {
-                    fprintf(stderr, "Cannot allocate memory!\n");
-                    exit(EXIT_FAILURE);
-                }
-                strcpy(serial_port_name, optarg);
-                break;
-            case 'l':
-                numPorts = comGetNoPorts();
-                fprintf(stdout, "Printing available COM ports (%i):\n", numPorts);
-                for(int i = 0; i < numPorts; i++){
-                    fprintf(stdout, "Port %i: %s (%s)\n", i, comGetInternalName(i), comGetPortName(i));
-                }
-                exit(EXIT_SUCCESS);
-            case 'h':
-            default:
-                usage(argv[0]);
-                exit(EXIT_FAILURE);
-        }
-    }
-*/
-    serial_port_name = "COM3";
-
-    if (!serial_port_name) {
-        fprintf(stderr, "Please supply the serial port path where the Piksi is " \
-                    "connected!\n");
+    if((sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET){
+        printf("Could not create socket: %d", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
+    printf("Socket created\n");
 
-    printf("Port: %s\n", serial_port_name);
-
-    piksi_port = comFindPort(serial_port_name);
-    if(piksi_port == -1){
-        fprintf(stderr, "Cannot find provided serial port!\n");
+    /*if(bind(sock, (struct sockaddr *) &si_other, sizeof(si_other)) == SOCKET_ERROR){
+        printf("Failed to bind: %d", WSAGetLastError());
         exit(EXIT_FAILURE);
-    }
+    }*/
 
-    printf("Attempting to open the serial port...\n");
+    memset((char *) &si_other, 0, slen);
 
-    result = comOpen(piksi_port, 115200);
-    if(result != 1){
-        fprintf(stderr, "Cannot open %s for reading! Result: %i\n", serial_port_name, result);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Serial port opened!\n");
+    si_other.sin_family = AF_INET;
+    //si_other.sin_addr.s_addr = htonl(INADDR_ANY);
+    si_other.sin_addr.S_un.S_addr = inet_addr(SERVER);
+    si_other.sin_port = htons(PORT);
 
     sbp_state_init(&s);
 
@@ -165,14 +134,42 @@ int main(int argc, char **argv)
 
     sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, NULL, &monitor_callback_node);
 
-        //for(int i = 0; i < 10; i++){
-    while(1) {
-        sbp_process(&s, &piksi_port_read);
+
+    int result;
+    result = bind(sock, (SOCKADDR *) &si_other, sizeof(si_other));
+    if(result != 0){
+        printf("Bind failed with error %d", WSAGetLastError());
+        exit(EXIT_FAILURE);
     }
 
-    comClose(piksi_port);
 
-    free(serial_port_name);
+        //for(int i = 0; i < 10; i++){
+    while(1) {
+        /*printf("Enter message:\n");
+        gets(message);
+
+        if(sendto(sock, message, strlen(message), 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR){
+            printf("sendto() failed with error code: %d", WSAGetLastError());
+            exit(EXIT_FAILURE);
+        }*/
+
+        memset(buf, '\0', BUFLEN);
+
+        slen = sizeof(si_other);
+
+        result = recvfrom(sock, buf, BUFLEN, 0, (SOCKADDR*) &si_other, &slen);
+        if(result == SOCKET_ERROR){
+            printf("recvfrom() failed with error code: %d", WSAGetLastError());
+            printf("Result = %d", result);
+            exit(EXIT_FAILURE);
+        }
+        printf("Result: %d", result);
+
+        puts(buf);
+    }
+
+    closesocket(sock);
+    WSACleanup();
 
     return 0;
 }
