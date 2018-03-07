@@ -12,6 +12,7 @@
     #include <arpa/inet.h>
     #include <netdb.h>  /* Needed for getaddrinfo() and freeaddrinfo() */
     #include <unistd.h> /* Needed for close() */
+    #include <errno.h>
 #endif
 
 #include <stdio.h>
@@ -19,6 +20,12 @@
 #include <libsbp/sbp.h>
 #include <libsbp/system.h>
 #include <libsbp/piksi.h>
+#include <conio.h>
+
+#ifndef _WIN32
+    typedef int SOCKET;
+    extern int errno;
+#endif
 
 #define bcopy(b1,b2,len) (memmove((b2), (b1), (len)), (void) 0)
 #define bzero(b,len) (memset((b), '\0', (len)), (void) 0)
@@ -28,6 +35,48 @@
 
 static sbp_msg_callbacks_node_t heartbeat_callback_node;
 static sbp_msg_callbacks_node_t monitor_callback_node;
+static SOCKET sock;
+
+int sockInit(void)
+{
+#ifdef _WIN32
+    WSADATA wsa_data;
+    return WSAStartup(MAKEWORD(1,1), &wsa_data);
+#else
+    return 0;
+#endif
+}
+
+int sockClose(SOCKET sock)
+{
+    int status = 0;
+#ifdef _WIN32
+    status = shutdown(sock, SD_BOTH);
+    if (status == 0) { status = closesocket(sock); }
+#else
+    status = shutdown(sock, SHUT_RDWR);
+    if (status == 0) { status = close(sock); }
+#endif
+    return status;
+}
+
+int sockQuit(void)
+{
+#ifdef _WIN32
+    return WSACleanup();
+#else
+    return 0;
+#endif
+}
+
+void exitError(char *name){
+#ifdef _WIN32
+    fprintf(stderr, "%s: error %d", name, WSAGetLastError());
+#else
+    fprintf(stderr, "%s: error %d", errno);
+#endif
+    exit(EXIT_FAILURE);
+}
 
 void printByteMessage(char *name, u8 len, u8 msg[])
 {
@@ -88,14 +137,12 @@ void monitor_callback(u16 sender_id, u8 len, u8 msg[], void *context)
     printf("Front Temp: %.2fC\n", bytesToSignedShort(8, msg) / 100.0);
 }
 
-int sock;
-
 u32 piksi_port_read(u8 *buff, u32 n, void *context)
 {
     (void)context;
     u32 result;
 
-    result = (u32) recv((SOCKET) sock, (char *) buff, n, 0);
+    result = (u32) recv(sock, (char *) buff, n, 0);
 
     return result;
 }
@@ -105,29 +152,23 @@ int main(int argc, char **argv)
     sbp_state_t s; // SBP State object
     struct sockaddr_in serveraddr; // Destination information (ip and port)
     struct hostent *server;
-    WSADATA wsa;
     int sbp_result;
 
-    /* Initialize Winsock version 2.2 */
-    printf("Initializing WinSock...\n");
-    if(WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR){
-        printf("Failed. Error code: %d", WSAGetLastError());
-        exit(EXIT_FAILURE);
-    }
+    /* Initialize socket */
+    printf("Initializing socket...\n");
+    sockInit();
     printf("Initialized\n");
 
     /* Initialize TCP socket */
-    if((sock = (int) socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET){
-        fprintf(stderr, "Could not create socket: %d", WSAGetLastError());
-        exit(EXIT_FAILURE);
+    if((sock = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET){
+        exitError("Socket create");
     }
     printf("Socket created\n");
 
     /* Get the server's DNS entry */
     server = gethostbyname(SERVER);
     if (server == NULL) {
-        fprintf(stderr, "ERROR, no such host\n");
-        exit(EXIT_FAILURE);
+        exitError("Get Hostname");
     }
 
     /* build the server's Internet address */
@@ -137,9 +178,8 @@ int main(int argc, char **argv)
     serveraddr.sin_port = htons(PORT);
 
     /* Connect to server via TCP */
-    if(connect((SOCKET) sock, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0){
-        fprintf(stderr, "Failed to connect: %d", WSAGetLastError());
-        exit(EXIT_FAILURE);
+    if(connect(sock, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0){
+        exitError("Failed to connect");
     }
 
     /* Initialize SBP */
@@ -151,11 +191,11 @@ int main(int argc, char **argv)
     do{
         sbp_result = sbp_process(&s, &piksi_port_read);
     }
-    while(sbp_result >= 0);
+    while(sbp_result >= 0 && _kbhit() == 0); // _kbhit returns > 0 if a key has been entered, this lets us exit the loop gracefully.
 
     /* Finish off the program */
-    closesocket((SOCKET) sock);
-    WSACleanup();
+    sockClose(sock);
+    sockQuit();
 
     return 0;
 }
