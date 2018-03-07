@@ -1,11 +1,27 @@
 
-#include <winsock2.h>
+#ifdef _WIN32
+    /* See http://stackoverflow.com/questions/12765743/getaddrinfo-on-win32 */
+    #ifndef _WIN32_WINNT
+        #define _WIN32_WINNT 0x0501  /* Windows XP. */
+    #endif
+    #include <winsock2.h>
+    #include <Ws2tcpip.h>
+#else
+    /* Assume that any non-Windows platform uses POSIX-style sockets instead. */
+    #include <sys/socket.h>
+    #include <arpa/inet.h>
+    #include <netdb.h>  /* Needed for getaddrinfo() and freeaddrinfo() */
+    #include <unistd.h> /* Needed for close() */
+#endif
 
 #include <stdio.h>
 
 #include <libsbp/sbp.h>
 #include <libsbp/system.h>
 #include <libsbp/piksi.h>
+
+#define bcopy(b1,b2,len) (memmove((b2), (b1), (len)), (void) 0)
+#define bzero(b,len) (memset((b), '\0', (len)), (void) 0)
 
 #define PORT 55555  //The port on which to listen for incoming data
 #define SERVER "192.168.0.222"
@@ -86,10 +102,10 @@ u32 piksi_port_read(u8 *buff, u32 n, void *context)
 
 int main(int argc, char **argv)
 {
-    sbp_state_t s{}; // SBP State object
-    struct sockaddr_in serveraddr{}; // Destination information (ip and port)
+    sbp_state_t s; // SBP State object
+    struct sockaddr_in serveraddr; // Destination information (ip and port)
     struct hostent *server;
-    WSADATA wsa{};
+    WSADATA wsa;
     int sbp_result;
 
     /* Initialize Winsock version 2.2 */
@@ -109,7 +125,7 @@ int main(int argc, char **argv)
 
     /* Get the server's DNS entry */
     server = gethostbyname(SERVER);
-    if (server == nullptr) {
+    if (server == NULL) {
         fprintf(stderr, "ERROR, no such host\n");
         exit(EXIT_FAILURE);
     }
@@ -128,8 +144,8 @@ int main(int argc, char **argv)
 
     /* Initialize SBP */
     sbp_state_init(&s);
-    sbp_register_callback(&s, SBP_MSG_HEARTBEAT, &heartbeat_callback, nullptr, &heartbeat_callback_node);
-    sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, nullptr, &monitor_callback_node);
+    sbp_register_callback(&s, SBP_MSG_HEARTBEAT, &heartbeat_callback, NULL, &heartbeat_callback_node);
+    sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, NULL, &monitor_callback_node);
 
     /* Read data stream */
     do{
