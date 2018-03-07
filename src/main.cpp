@@ -86,12 +86,13 @@ u32 piksi_port_read(u8 *buff, u32 n, void *context)
 
 int main(int argc, char **argv)
 {
-    sbp_state_t s{};
-
-    struct sockaddr_in serveraddr{};
+    sbp_state_t s{}; // SBP State object
+    struct sockaddr_in serveraddr{}; // Destination information (ip and port)
     struct hostent *server;
     WSADATA wsa{};
+    int sbp_result;
 
+    /* Initialize Winsock version 2.2 */
     printf("Initializing WinSock...\n");
     if(WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR){
         printf("Failed. Error code: %d", WSAGetLastError());
@@ -99,6 +100,7 @@ int main(int argc, char **argv)
     }
     printf("Initialized\n");
 
+    /* Initialize TCP socket */
     if((sock = (int) socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET){
         fprintf(stderr, "Could not create socket: %d", WSAGetLastError());
         exit(EXIT_FAILURE);
@@ -130,12 +132,12 @@ int main(int argc, char **argv)
     sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, nullptr, &monitor_callback_node);
 
     /* Read data stream */
-    int sbp_result;
     do{
         sbp_result = sbp_process(&s, &piksi_port_read);
     }
     while(sbp_result >= 0);
 
+    /* Finish off the program */
     closesocket((SOCKET) sock);
     WSACleanup();
 
