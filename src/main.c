@@ -6,6 +6,7 @@
     #endif
     #include <winsock2.h>
     #include <Ws2tcpip.h>
+    #include <conio.h>
 #else
     /* Assume that any non-Windows platform uses POSIX-style sockets instead. */
     #include <sys/socket.h>
@@ -13,6 +14,10 @@
     #include <netdb.h>  /* Needed for getaddrinfo() and freeaddrinfo() */
     #include <unistd.h> /* Needed for close() */
     #include <errno.h>
+    //#include <curses.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #define h_addr h_addr_list[0]
 #endif
 
 #include <stdio.h>
@@ -20,11 +25,24 @@
 #include <libsbp/sbp.h>
 #include <libsbp/system.h>
 #include <libsbp/piksi.h>
-#include <conio.h>
 
 #ifndef _WIN32
     typedef int SOCKET;
     extern int errno;
+
+    int _kbhit(void)
+    {
+    /*
+        int ch = getch();
+
+        if (ch != ERR) {
+            ungetch(ch);
+            return 1;
+        } else {
+            return 0;
+        }
+       */
+    }
 #endif
 
 #define bcopy(b1,b2,len) (memmove((b2), (b1), (len)), (void) 0)
@@ -73,7 +91,7 @@ void exitError(char *name){
 #ifdef _WIN32
     fprintf(stderr, "%s: error %d", name, WSAGetLastError());
 #else
-    fprintf(stderr, "%s: error %d", errno);
+    fprintf(stderr, "%s: error %d", name, errno);
 #endif
     exit(EXIT_FAILURE);
 }
@@ -160,7 +178,7 @@ int main(int argc, char **argv)
     printf("Initialized\n");
 
     /* Initialize TCP socket */
-    if((sock = socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET){
+    if((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         exitError("Socket create");
     }
     printf("Socket created\n");
