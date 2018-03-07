@@ -2,25 +2,16 @@
 #include <winsock2.h>
 
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 
 #include <libsbp/sbp.h>
 #include <libsbp/system.h>
 #include <libsbp/piksi.h>
-#include <w32api/inaddr.h>
 
-#define BUFLEN 512  //Max length of buffer
-#define PORT 55557  //The port on which to listen for incoming data
+#define PORT 55555  //The port on which to listen for incoming data
 #define SERVER "192.168.0.222"
 
 static sbp_msg_callbacks_node_t heartbeat_callback_node;
 static sbp_msg_callbacks_node_t monitor_callback_node;
-
-void usage(char *prog_name) {
-    fprintf(stderr, "usage: %s [-p serial port] [-l]\n", prog_name);
-}
 
 void printByteMessage(char *name, u8 len, u8 msg[])
 {
@@ -81,26 +72,25 @@ void monitor_callback(u16 sender_id, u8 len, u8 msg[], void *context)
     printf("Front Temp: %.2fC\n", bytesToSignedShort(8, msg) / 100.0);
 }
 
+int sock;
+
 u32 piksi_port_read(u8 *buff, u32 n, void *context)
 {
     (void)context;
     u32 result;
 
-    //result = comRead(piksi_port, (char *) buff, n);
+    result = (u32) recv((SOCKET) sock, (char *) buff, n, 0);
 
     return result;
 }
 
 int main(int argc, char **argv)
 {
-    sbp_state_t s;
+    sbp_state_t s{};
 
-    struct sockaddr_in si_other;
-    SOCKET sock;
-    int slen;
-    char buf[BUFLEN];
-    char message[BUFLEN];
-    WSADATA wsa;
+    struct sockaddr_in serveraddr{};
+    struct hostent *server;
+    WSADATA wsa{};
 
     printf("Initializing WinSock...\n");
     if(WSAStartup(MAKEWORD(2, 2), &wsa) != NO_ERROR){
@@ -109,66 +99,44 @@ int main(int argc, char **argv)
     }
     printf("Initialized\n");
 
-    if((sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET){
-        printf("Could not create socket: %d", WSAGetLastError());
+    if((sock = (int) socket(AF_INET, SOCK_STREAM, 0)) == INVALID_SOCKET){
+        fprintf(stderr, "Could not create socket: %d", WSAGetLastError());
         exit(EXIT_FAILURE);
     }
     printf("Socket created\n");
 
-    /*if(bind(sock, (struct sockaddr *) &si_other, sizeof(si_other)) == SOCKET_ERROR){
-        printf("Failed to bind: %d", WSAGetLastError());
+    /* Get the server's DNS entry */
+    server = gethostbyname(SERVER);
+    if (server == nullptr) {
+        fprintf(stderr, "ERROR, no such host\n");
         exit(EXIT_FAILURE);
-    }*/
+    }
 
-    memset((char *) &si_other, 0, slen);
+    /* build the server's Internet address */
+    bzero((char *) &serveraddr, sizeof(serveraddr));
+    serveraddr.sin_family = AF_INET;
+    bcopy(server->h_addr, (char *)&serveraddr.sin_addr.s_addr, (size_t) server->h_length);
+    serveraddr.sin_port = htons(PORT);
 
-    si_other.sin_family = AF_INET;
-    //si_other.sin_addr.s_addr = htonl(INADDR_ANY);
-    si_other.sin_addr.S_un.S_addr = inet_addr(SERVER);
-    si_other.sin_port = htons(PORT);
+    /* Connect to server via TCP */
+    if(connect((SOCKET) sock, (struct sockaddr *) &serveraddr, sizeof(serveraddr)) < 0){
+        fprintf(stderr, "Failed to connect: %d", WSAGetLastError());
+        exit(EXIT_FAILURE);
+    }
 
+    /* Initialize SBP */
     sbp_state_init(&s);
+    sbp_register_callback(&s, SBP_MSG_HEARTBEAT, &heartbeat_callback, nullptr, &heartbeat_callback_node);
+    sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, nullptr, &monitor_callback_node);
 
-    sbp_register_callback(&s, SBP_MSG_HEARTBEAT, &heartbeat_callback, NULL,
-                          &heartbeat_callback_node);
-
-    sbp_register_callback(&s, SBP_MSG_DEVICE_MONITOR, &monitor_callback, NULL, &monitor_callback_node);
-
-
-    int result;
-    result = bind(sock, (SOCKADDR *) &si_other, sizeof(si_other));
-    if(result != 0){
-        printf("Bind failed with error %d", WSAGetLastError());
-        exit(EXIT_FAILURE);
+    /* Read data stream */
+    int sbp_result;
+    do{
+        sbp_result = sbp_process(&s, &piksi_port_read);
     }
+    while(sbp_result >= 0);
 
-
-        //for(int i = 0; i < 10; i++){
-    while(1) {
-        /*printf("Enter message:\n");
-        gets(message);
-
-        if(sendto(sock, message, strlen(message), 0, (struct sockaddr *) &si_other, slen) == SOCKET_ERROR){
-            printf("sendto() failed with error code: %d", WSAGetLastError());
-            exit(EXIT_FAILURE);
-        }*/
-
-        memset(buf, '\0', BUFLEN);
-
-        slen = sizeof(si_other);
-
-        result = recvfrom(sock, buf, BUFLEN, 0, (SOCKADDR*) &si_other, &slen);
-        if(result == SOCKET_ERROR){
-            printf("recvfrom() failed with error code: %d", WSAGetLastError());
-            printf("Result = %d", result);
-            exit(EXIT_FAILURE);
-        }
-        printf("Result: %d", result);
-
-        puts(buf);
-    }
-
-    closesocket(sock);
+    closesocket((SOCKET) sock);
     WSACleanup();
 
     return 0;
